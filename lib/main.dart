@@ -67,17 +67,19 @@ class EngineData extends ChangeNotifier {
 // 2. MOIL CONFIGURATION
 // ---------------------------------------------------------
 class MoilConfig extends ChangeNotifier {
+  double mode = 0.0; // 0 = Anypoint, 1 = Julia
   double alpha = 0.0;
   double beta = 0.0;
-  double zoom = 1.0;
+  double zoom = 4.0;
+  double alphaMax = 110.0;
 
-  final double imageWidth = 2880.0;
-  final double imageHeight = 2880.0;
-  final double iCx = 1440.0;
-  final double iCy = 1440.0;
-  final double calibrationRatio = 6.0;
+  final double imageWidth = 2592.0;
+  final double imageHeight = 1944.0;
+  final double iCx = 1236.0;
+  final double iCy = 950.0;
+  final double calibrationRatio = 0.9; // Rasio kalibrasi untuk mengkonversi pixel ke unit dunia nyata
 
-  final double p0 = 0.0, p1 = 0.0, p2 = -8.5773, p3 = 16.551, p4 = -4.9915, p5 = 147.64;
+  final double p0 = 0.0, p1 = 0.0, p2 = -34.367, p3 = 70.646, p4 = 41.608, p5 = 504.11;
 
   void updateControls(double a, double b, double z) {
     alpha = a;
@@ -177,13 +179,36 @@ class _MoilShaderHomeState extends State<MoilShaderHome> {
                                       }
                                       _lastTick = now;
 
-                                      final shader = _program!.fragmentShader();
-                                      [size.width, size.height, _moilConfig.alpha, _moilConfig.beta, _moilConfig.zoom,
-                                       _moilConfig.imageWidth, _moilConfig.imageHeight, _moilConfig.iCx, _moilConfig.iCy,
-                                       _moilConfig.calibrationRatio, _moilConfig.p0, _moilConfig.p1, _moilConfig.p2,
-                                       _moilConfig.p3, _moilConfig.p4, _moilConfig.p5].asMap().forEach((i, v) => shader.setFloat(i, v));
+                                     final shader = _program!.fragmentShader();
 
-                                      shader.setImageSampler(0, image);
+shader.setFloat(0, _moilConfig.mode); // uMode
+shader.setFloat(1, size.width);       // uResolution.x
+shader.setFloat(2, size.height);      // uResolution.y
+
+// uControl (vec4)
+shader.setFloat(3, _moilConfig.alpha);
+shader.setFloat(4, _moilConfig.beta);
+shader.setFloat(5, _moilConfig.zoom);
+shader.setFloat(6, _moilConfig.alphaMax);
+
+// uMoilSize
+shader.setFloat(7, _moilConfig.imageWidth);
+shader.setFloat(8, _moilConfig.imageHeight);
+
+// uMoilCenter
+shader.setFloat(9, _moilConfig.iCx);
+shader.setFloat(10, _moilConfig.iCy);
+
+// uCpRatio & Poly
+shader.setFloat(11, _moilConfig.calibrationRatio);
+shader.setFloat(12, _moilConfig.p0);
+shader.setFloat(13, _moilConfig.p1);
+shader.setFloat(14, _moilConfig.p2);
+shader.setFloat(15, _moilConfig.p3);
+shader.setFloat(16, _moilConfig.p4);
+shader.setFloat(17, _moilConfig.p5);
+
+shader.setImageSampler(0, image);
                                       canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
                                     },
                                     child: IgnorePointer(child: Video(controller: _videoController)),
@@ -207,32 +232,55 @@ class _MoilShaderHomeState extends State<MoilShaderHome> {
 
   // --- WIDGETS ---
 
-  Widget _buildPerformanceOverlay() {
+ Widget _buildPerformanceOverlay() {
     return Positioned(
       top: 40,
       left: 20,
-      child: ListenableBuilder(
-        listenable: _engineData,
-        builder: (context, _) {
-          return Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Metrik Engine
+            ListenableBuilder(
+              listenable: _engineData,
+              builder: (context, _) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _perfRow(Icons.speed, "FPS", "${_engineData.fps.toStringAsFixed(1)}"),
+                    _perfRow(Icons.timer, "FRAME", "${_engineData.frameTimeMs.toStringAsFixed(2)} ms"),
+                    _perfRow(Icons.memory, "MEM", "${_engineData.memoryMB} MB"),
+                  ],
+                );
+              },
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _perfRow(Icons.speed, "FPS", "${_engineData.fps.toStringAsFixed(1)}"),
-                _perfRow(Icons.timer, "FRAME", "${_engineData.frameTimeMs.toStringAsFixed(2)} ms"),
-                _perfRow(Icons.memory, "MEM (RSS)", "${_engineData.memoryMB} MB"),
-                const SizedBox(height: 4),
-                const Text("GPU: SHADER ACTIVE", style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-              ],
+            const Divider(color: Colors.white24, height: 15),
+            
+            // Parameter Moil (Alpha, Beta, Zoom)
+            ListenableBuilder(
+              listenable: _moilConfig,
+              builder: (context, _) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _perfRow(Icons.zoom_in, "ALPHA", "${_moilConfig.alpha.toStringAsFixed(2)}°"),
+                    _perfRow(Icons.zoom_out, "BETA ", "${_moilConfig.beta.toStringAsFixed(2)}°"),
+                    _perfRow(Icons.zoom_in, "ZOOM ", "${_moilConfig.zoom.toStringAsFixed(2)}x"),
+                  ],
+                );
+              },
             ),
-          );
-        },
+            const SizedBox(height: 6),
+            const Text("GPU: SHADER ACTIVE", 
+              style: TextStyle(color: Colors.orangeAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+          ],
+        ),
       ),
     );
   }
